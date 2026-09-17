@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,6 +39,43 @@ type stubMISP struct {
 	addedStatus int
 	attached    []string
 	attachFail  map[string]bool
+
+	templates     []map[string]any
+	templateDefs  map[string]map[string]any
+	relationships []map[string]any
+	relStatus     int
+
+	createdEvent   map[string]any
+	objectOutcomes map[string]string
+	objectSeq      int
+	objectPayloads []map[string]any
+	refPayloads    []map[string]any
+	refStatus      int
+	breakFlags     []string
+}
+
+func (s *stubMISP) objects() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]map[string]any(nil), s.objectPayloads...)
+}
+
+func (s *stubMISP) refs() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]map[string]any(nil), s.refPayloads...)
+}
+
+func (s *stubMISP) event() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.createdEvent
+}
+
+func (s *stubMISP) breaks() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.breakFlags...)
 }
 
 func (s *stubMISP) record(k string) {
@@ -230,6 +268,84 @@ func (s *stubMISP) handler(t *testing.T) http.HandlerFunc {
 				"categories":             []string{"Network activity", "Payload delivery"},
 				"category_type_mappings": map[string][]string{"Network activity": {"ip-dst", "domain"}},
 			}})
+
+		case path == "/objectTemplates/index":
+			s.record("objectTemplates/index")
+			out := make([]map[string]any, 0, len(s.templates))
+			for _, t := range s.templates {
+				out = append(out, map[string]any{"ObjectTemplate": t})
+			}
+			json.NewEncoder(w).Encode(out)
+
+		case strings.HasPrefix(path, "/objectTemplates/getRaw/"):
+			name := strings.TrimPrefix(path, "/objectTemplates/getRaw/")
+			s.record("getRaw:" + name)
+			if def, ok := s.templateDefs[name]; ok {
+				json.NewEncoder(w).Encode(def)
+				return
+			}
+			w.WriteHeader(404)
+
+		case path == "/object_relationships/index":
+			s.record("relationships")
+			if s.relStatus != 0 {
+				w.WriteHeader(s.relStatus)
+				return
+			}
+			out := make([]map[string]any, 0, len(s.relationships))
+			for _, r := range s.relationships {
+				out = append(out, map[string]any{"ObjectRelationship": r})
+			}
+			json.NewEncoder(w).Encode(out)
+
+		case path == "/events/add":
+			s.record("events/add")
+			body := decodeBody(r)
+			s.mu.Lock()
+			s.createdEvent = body
+			s.mu.Unlock()
+			out := map[string]any{"id": "77", "uuid": "event-77", "published": false, "org_id": "1", "orgc_id": "2"}
+			for k, v := range body {
+				out[k] = v
+			}
+			json.NewEncoder(w).Encode(map[string]any{"Event": out})
+
+		case strings.HasPrefix(path, "/objects/add/"):
+			s.record("objects/add")
+			body := decodeBody(r)
+			name, _ := body["name"].(string)
+			s.mu.Lock()
+			s.objectPayloads = append(s.objectPayloads, body)
+			s.breakFlags = append(s.breakFlags, path[strings.LastIndex(path, "/")+1:])
+			s.objectSeq++
+			seq := s.objectSeq
+			outcome := s.objectOutcomes[name]
+			s.mu.Unlock()
+			switch outcome {
+			case "duplicate":
+				json.NewEncoder(w).Encode(map[string]any{"errors": "Duplicate object found: an object with the same attributes already exists"})
+			case "error":
+				json.NewEncoder(w).Encode(map[string]any{"errors": "Object could not be saved"})
+			default:
+				attrs, _ := body["Attribute"].([]any)
+				json.NewEncoder(w).Encode(map[string]any{"Object": map[string]any{
+					"id": fmt.Sprint(600 + seq), "uuid": fmt.Sprintf("obj-%s-%d", name, seq),
+					"name": name, "Attribute": attrs,
+				}})
+			}
+
+		case path == "/objectReferences/add":
+			s.record("objectReferences/add")
+			body := decodeBody(r)
+			if s.refStatus != 0 {
+				w.WriteHeader(s.refStatus)
+				w.Write([]byte(`{"name":"refused"}`))
+				return
+			}
+			s.mu.Lock()
+			s.refPayloads = append(s.refPayloads, body)
+			s.mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]any{"saved": true})
 
 		default:
 			t.Errorf("unexpected request to %s", path)
