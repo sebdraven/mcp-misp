@@ -1,0 +1,29 @@
+# The server publishes on the host's loopback only. It has no authentication of
+# its own and holds a MISP API key, so anything able to reach the port holds
+# that key; `tailscale serve 8080` or a reverse proxy is what puts it in front
+# of other people.
+services:
+  mcp-misp:
+    image: ghcr.io/sebdraven/mcp-misp:latest
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      MISP_URL: ${MISP_URL:?set MISP_URL in .env}
+      MISP_KEY: ${MISP_KEY:?set MISP_KEY in .env}
+      MISP_VERIFY_SSL: ${MISP_VERIFY_SSL:-true}
+      MISP_TIMEOUT: ${MISP_TIMEOUT:-60s}
+      # Writes stay off unless this is explicitly false.
+      MISP_READONLY: ${MISP_READONLY:-true}
+      MISP_OUT_ROOT: /var/lib/mcp-misp/out
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - misp-out:/var/lib/mcp-misp/out
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  misp-out:

@@ -1,0 +1,8 @@
+bin/
+out/
+.git
+.github
+*.md
+!README.md
+Dockerfile
+.dockerignore

@@ -1,0 +1,15 @@
+# zizmor configuration.
+#
+# Exceptions live here, versioned and reviewable, never as inline ignores
+# scattered through the workflows: an ignore comment next to the finding is read
+# once, by whoever added it, and never again.
+#
+# Every entry must carry the reason it is acceptable. Format:
+#
+#   rules:
+#     <rule-id>:
+#       ignore:
+#         - <workflow file>:<line>:<column>
+#
+# There are no exceptions at present.
+rules: {}
