@@ -25,6 +25,28 @@ func RegisterWrite(s *mcp.Server, svc *service.Service) []*mcp.Tool {
 	}, r.addAttribute)
 
 	add(s, &tools, &mcp.Tool{
+		Name: "misp_create_event",
+		Description: "Create a new MISP event. Present only because this server was started with MISP_READONLY=false. " +
+			"distribution is REQUIRED and is given by name, never as a number: MISP encodes these 0-4, and a caller passing 3 in the belief that it restricts sharing publishes to every connected community. " +
+			"Accepted values are your_organisation_only, this_community, connected_communities, all_communities and sharing_group; the last one also needs sharing_group_id. " +
+			"There is no default: on a CSIRT instance the instance-wide default can be all_communities, and a badly distributed event is a sharing incident, not a typo. " +
+			"The event is created UNPUBLISHED and there is no way to publish it from here — publishing stays a human decision in the MISP interface, same reason there has never been a publish tool. " +
+			"Returns the id and uuid, which is what misp_add_objects takes next.",
+	}, r.createEvent)
+
+	add(s, &tools, &mcp.Tool{
+		Name: "misp_add_objects",
+		Description: "Add several MISP objects to an event IN ONE CALL, with the references that link them. " +
+			"This is the tool for landing a whole analysis — a file, its certificate, its C2 domains, its permissions — as one linked graph rather than as ten calls with a uuid carried between them. " +
+			"Each object may declare a local 'ref'; references[] joins those refs, so objects created in the same call can be linked without knowing their uuid in advance. A reference endpoint may also be the uuid of an object already in the event. " +
+			"Call misp_object_templates FIRST: relation names come from the template, and a relation the template does not declare is refused. " +
+			"VALIDATION IS WHOLE-BATCH AND HAPPENS BEFORE ANY WRITE. An unknown relation, a wrong attribute type, a missing required relation, a violated multiplicity, an unresolvable reference or a warninglist hit refuses the ENTIRE batch with per-object, per-relation detail, and nothing is created. " +
+			"allow_unknown_relations loosens only the unknown-relation case, and it still refuses to coerce a value that looks like a hash, IP, domain, URL or email into free text — MISP never correlates on text, so that would be intel written and lost. " +
+			"on_duplicate decides what MISP does when an identical object already exists: reject (default) or create. It is always sent explicitly, never left to the instance's setting. " +
+			"There is NO ROLLBACK — this server has no delete. If a write fails after validation, read failed_at and not_attempted: they name exactly what exists and exactly what does not.",
+	}, r.addObjects)
+
+	add(s, &tools, &mcp.Tool{
 		Name: "misp_tag",
 		Description: "Attach tags to an existing event or attribute. Present only because this server was started with MISP_READONLY=false. " +
 			"Adding only: there is no removal tool, and that is deliberate. tlp: and PAP: tags drive how MISP distributes data, so removing one is a sharing decision dressed as an annotation. " +
@@ -47,6 +69,40 @@ type addAttributeInput struct {
 	AllowWarninglisted bool     `json:"allow_warninglisted,omitempty" jsonschema:"create the attribute even though its value matches a warninglist; read the refusal first, it names the list"`
 }
 
+type createEventInput struct {
+	Info           string   `json:"info" jsonschema:"the event title; this is what an analyst reads first in a list of events"`
+	Distribution   string   `json:"distribution" jsonschema:"REQUIRED, by name: your_organisation_only, this_community, connected_communities, all_communities or sharing_group"`
+	SharingGroupID *int     `json:"sharing_group_id,omitempty" jsonschema:"required when distribution is sharing_group, rejected otherwise"`
+	Date           string   `json:"date,omitempty" jsonschema:"event date, YYYY-MM-DD; the instance uses today when omitted"`
+	ThreatLevel    string   `json:"threat_level,omitempty" jsonschema:"high, medium, low or undefined"`
+	Analysis       string   `json:"analysis,omitempty" jsonschema:"initial, ongoing or completed"`
+	Tags           []string `json:"tags,omitempty" jsonschema:"tags to attach; they must already exist on this instance, see misp_taxonomies"`
+}
+
+type objectSpecInput struct {
+	Ref          string         `json:"ref,omitempty" jsonschema:"a local name for this object, used by references[] within this call; never sent to MISP"`
+	Template     string         `json:"template" jsonschema:"object template name, e.g. file or x509; see misp_object_templates"`
+	Values       map[string]any `json:"values" jsonschema:"relation name to value, or to a list of values when the template marks the relation multiple"`
+	Comment      string         `json:"comment,omitempty" jsonschema:"comment carried on the object"`
+	Distribution string         `json:"distribution,omitempty" jsonschema:"by name, as in misp_create_event; omit to inherit the event's"`
+}
+
+type referenceSpecInput struct {
+	From             string `json:"from" jsonschema:"a ref declared in this call, or the uuid of an object already in the event"`
+	To               string `json:"to" jsonschema:"a ref declared in this call, or the uuid of an object already in the event"`
+	RelationshipType string `json:"relationship_type" jsonschema:"e.g. derived-from, contains, executes; validated only when the instance exposes its vocabulary, and the value actually written is echoed back either way"`
+	Comment          string `json:"comment,omitempty"`
+}
+
+type addObjectsInput struct {
+	Event                 string               `json:"event" jsonschema:"numeric id or uuid of the event to add to"`
+	Objects               []objectSpecInput    `json:"objects" jsonschema:"the objects to create, validated as a whole before any of them is written"`
+	References            []referenceSpecInput `json:"references,omitempty" jsonschema:"links between the objects of this call, or to objects already in the event"`
+	OnDuplicate           string               `json:"on_duplicate,omitempty" jsonschema:"reject (default) refuses an object whose attributes match one already in the event; create writes it anyway"`
+	AllowUnknownRelations bool                 `json:"allow_unknown_relations,omitempty" jsonschema:"accept relations the template does not declare, writing them as text; still refused for values that look like an IOC"`
+	AllowWarninglisted    bool                 `json:"allow_warninglisted,omitempty" jsonschema:"write values that match a warninglist; read the refusal first, it names the list and the engine"`
+}
+
 type tagInput struct {
 	Target string   `json:"target" jsonschema:"event or attribute"`
 	ID     string   `json:"id" jsonschema:"numeric id or UUID of the target"`
@@ -61,6 +117,43 @@ func (r *registry) addAttribute(ctx context.Context, _ *mcp.CallToolRequest, in 
 	})
 	if err != nil {
 		return nil, service.AddAttributeResult{}, err
+	}
+	return nil, *res, nil
+}
+
+func (r *registry) createEvent(ctx context.Context, _ *mcp.CallToolRequest, in createEventInput) (*mcp.CallToolResult, service.CreateEventResult, error) {
+	res, err := r.svc.CreateEvent(ctx, service.CreateEventInput{
+		Info: in.Info, Distribution: in.Distribution, SharingGroupID: in.SharingGroupID,
+		Date: in.Date, ThreatLevel: in.ThreatLevel, Analysis: in.Analysis, Tags: in.Tags,
+	})
+	if err != nil {
+		return nil, service.CreateEventResult{}, err
+	}
+	return nil, *res, nil
+}
+
+func (r *registry) addObjects(ctx context.Context, _ *mcp.CallToolRequest, in addObjectsInput) (*mcp.CallToolResult, service.AddObjectsResult, error) {
+	objects := make([]service.ObjectSpec, 0, len(in.Objects))
+	for _, o := range in.Objects {
+		objects = append(objects, service.ObjectSpec{
+			Ref: o.Ref, Template: o.Template, Values: o.Values,
+			Comment: o.Comment, Distribution: o.Distribution,
+		})
+	}
+	references := make([]service.ReferenceSpec, 0, len(in.References))
+	for _, r := range in.References {
+		references = append(references, service.ReferenceSpec{
+			From: r.From, To: r.To, RelationshipType: r.RelationshipType, Comment: r.Comment,
+		})
+	}
+
+	res, err := r.svc.AddObjects(ctx, service.AddObjectsInput{
+		Event: in.Event, Objects: objects, References: references,
+		OnDuplicate: in.OnDuplicate, AllowUnknownRelations: in.AllowUnknownRelations,
+		AllowWarninglisted: in.AllowWarninglisted,
+	})
+	if err != nil {
+		return nil, service.AddObjectsResult{}, err
 	}
 	return nil, *res, nil
 }
