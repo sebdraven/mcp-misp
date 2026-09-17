@@ -100,15 +100,15 @@ func (c *Client) attempt(ctx context.Context, method, path string, query url.Val
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBody+1))
 	if err != nil {
 		return nil, c.transportErr(op, err)
 	}
-	if len(raw) > maxBody {
+	if int64(len(raw)) > c.maxBody {
 		return nil, &APIError{
 			Status:  resp.StatusCode,
 			kind:    KindTooLarge,
-			Message: fmt.Sprintf("the instance returned more than %d MiB for %s; narrow the query or lower the limit", maxBody>>20, op),
+			Message: fmt.Sprintf("the instance returned more than %d bytes for %s; narrow the query or lower the limit", c.maxBody, op),
 		}
 	}
 

@@ -40,6 +40,7 @@ type Client struct {
 	timeout     time.Duration
 	insecure    bool
 	concurrency int
+	maxBody     int64
 }
 
 type Option func(*Client)
@@ -89,6 +90,14 @@ func withBackoffBase(d time.Duration) Option {
 	return func(c *Client) { c.backoffBase = d }
 }
 
+func withMaxBody(n int64) Option {
+	return func(c *Client) {
+		if n > 0 {
+			c.maxBody = n
+		}
+	}
+}
+
 func New(baseURL, key string, opts ...Option) *Client {
 	c := &Client{
 		baseURL:     strings.TrimRight(baseURL, "/"),
@@ -97,6 +106,7 @@ func New(baseURL, key string, opts ...Option) *Client {
 		retries:     defaultRetries,
 		concurrency: defaultConcurrency,
 		backoffBase: defaultBackoff,
+		maxBody:     maxBody,
 	}
 	for _, o := range opts {
 		o(c)
