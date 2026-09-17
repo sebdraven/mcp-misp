@@ -19,11 +19,14 @@ var readToolNames = []string{
 	"misp_ioc_context",
 	"misp_warninglist_check",
 	"misp_taxonomies",
+	"misp_object_templates",
 	"misp_describe_instance",
 }
 
 var writeToolNames = []string{
 	"misp_add_attribute",
+	"misp_create_event",
+	"misp_add_objects",
 	"misp_tag",
 }
 
@@ -128,6 +131,9 @@ func TestDescriptionsCarryTheContract(t *testing.T) {
 		"misp_describe_instance": {"read-only", "include_type_mapping"},
 		"misp_add_attribute":     {"MISP_READONLY=false", "BEFORE anything is written", "allow_warninglisted", "valid_attributes"},
 		"misp_tag":               {"MISP_READONLY=false", "no removal tool", "misp_taxonomies"},
+		"misp_object_templates":  {"NO deduplication key", "required_one_of", "never from a table baked into this server"},
+		"misp_create_event":      {"REQUIRED and is given by name", "all_communities", "UNPUBLISHED", "no default"},
+		"misp_add_objects":       {"IN ONE CALL", "BEFORE ANY WRITE", "NO ROLLBACK", "not_attempted", "on_duplicate", "never correlates on text"},
 	}
 	for name, phrases := range must {
 		desc, ok := byName[name]

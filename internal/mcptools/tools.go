@@ -96,6 +96,15 @@ func Register(s *mcp.Server, svc *service.Service) []*mcp.Tool {
 	}, r.taxonomies)
 
 	add(s, &tools, &mcp.Tool{
+		Name: "misp_object_templates",
+		Description: "List the MISP object templates this instance carries, or detail one. " +
+			"This is to objects what misp_describe_instance is to attributes, and misp_add_objects is unusable without it: relation names are template-specific, and a guessed one either fails validation or lands as free text that never correlates. " +
+			"With no argument it inventories templates. With a template name it returns every relation, its MISP attribute type, whether it accepts several values, and the template's own constraints: required (all must be present) and required_one_of (at least one must be). " +
+			"MISP object templates declare NO deduplication key — required and required_one_of are the only constraints the format has. Whether an identical object is rejected or duplicated is decided at write time by misp_add_objects' on_duplicate parameter, not here. " +
+			"Templates come from the instance, never from a table baked into this server: a deployment can carry custom templates, and template versions move.",
+	}, r.objectTemplates)
+
+	add(s, &tools, &mcp.Tool{
 		Name: "misp_describe_instance",
 		Description: "Report what this particular instance offers: MISP version, the attribute types and categories it accepts, its organisations, how many warninglists are enabled, whether this server is read-only, and the ceilings it enforces. " +
 			"Call it first against an unfamiliar instance. The attribute type names and organisation names valid here are the ones misp_search expects, and guessing them is how one deployment's conventions end up hard-coded into every query. " +
@@ -161,6 +170,13 @@ type taxonomyInput struct {
 	OutDir            string `json:"out_dir,omitempty" jsonschema:"write the whole matching tag set to JSONL in this directory"`
 }
 
+type templateInput struct {
+	Template string `json:"template,omitempty" jsonschema:"template name (e.g. file, x509) or uuid; leave empty to inventory the instance's templates"`
+	Search   string `json:"search,omitempty" jsonschema:"substring match over template names and descriptions"`
+	Limit    int    `json:"limit,omitempty" jsonschema:"templates per page; an instance carries several hundred"`
+	Cursor   string `json:"cursor,omitempty" jsonschema:"next_cursor from the previous call"`
+}
+
 type describeInput struct {
 	IncludeTypeMapping bool `json:"include_type_mapping,omitempty" jsonschema:"include the category-to-type matrix; large, and rarely needed"`
 }
@@ -221,6 +237,16 @@ func (r *registry) taxonomies(ctx context.Context, _ *mcp.CallToolRequest, in ta
 	})
 	if err != nil {
 		return nil, service.TaxonomyResult{}, err
+	}
+	return nil, *res, nil
+}
+
+func (r *registry) objectTemplates(ctx context.Context, _ *mcp.CallToolRequest, in templateInput) (*mcp.CallToolResult, service.TemplateResult, error) {
+	res, err := r.svc.ObjectTemplates(ctx, service.TemplateInput{
+		Template: in.Template, Search: in.Search, Limit: in.Limit, Cursor: in.Cursor,
+	})
+	if err != nil {
+		return nil, service.TemplateResult{}, err
 	}
 	return nil, *res, nil
 }
