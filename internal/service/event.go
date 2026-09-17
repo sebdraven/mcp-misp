@@ -105,6 +105,9 @@ func (s *Service) Event(ctx context.Context, in EventInput) (*EventResult, error
 
 	out := &EventResult{Event: view, AttributePage: page, Warninglist: report}
 	out.Flags = append(out.Flags, coverageFlags(report)...)
+	if eventAllow["galaxies"] && len(view.Galaxies) == 0 {
+		out.Notes = append(out.Notes, galaxyReservation)
+	}
 	if total > limit {
 		out.Notes = append(out.Notes, fmt.Sprintf("the event carries %d attributes; this is one page of %d", total, limit))
 	}

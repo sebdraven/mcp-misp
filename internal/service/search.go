@@ -164,10 +164,15 @@ func (s *Service) searchEvents(ctx context.Context, p misp.SearchParams, in Sear
 
 	orgs, _ := s.orgIndex(ctx)
 	views := make([]EventView, 0, len(events))
+	galaxies := 0
 	for _, e := range events {
 		v := s.eventView(e, orgs)
 		projectEvent(&v, allow)
+		galaxies += len(v.Galaxies)
 		views = append(views, v)
+	}
+	if allow["galaxies"] && galaxies == 0 && len(views) > 0 {
+		out.Notes = append(out.Notes, galaxyReservation)
 	}
 
 	// Event mode returns no attribute values, so there is nothing to annotate.

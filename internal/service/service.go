@@ -200,6 +200,15 @@ func tagNames(tags []misp.Tag) []string {
 	return out
 }
 
+// galaxyReservation is emitted rather than guessed.
+//
+// Events are read with metadata=1, which MISP documents as returning the event,
+// its tags and its relations while omitting attributes. Whether the galaxy
+// expansion survives that has not been verified against a live instance, so an
+// empty galaxy list says which of the two it is instead of implying the event
+// has none.
+const galaxyReservation = "galaxies were requested and none came back; events are read with metadata=1 and whether that carries the galaxy expansion depends on the MISP version, so this may mean the event has no galaxy cluster or that this instance does not expand them here. Galaxy tags, if any, are still listed under tags."
+
 func boolPtr(b bool) *bool { return &b }
 
 func clamp(v, def, maxv int) int {

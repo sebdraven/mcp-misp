@@ -155,3 +155,29 @@ func TestEventSeparateFieldVocabularies(t *testing.T) {
 		t.Error("an attribute field name is not valid in the event vocabulary")
 	}
 }
+
+// Events are read with metadata=1. Whether that carries the galaxy expansion
+// depends on the MISP version and has not been verified against a live
+// instance, so an empty list says which of the two it is.
+func TestEventStatesTheGalaxyReservation(t *testing.T) {
+	s := eventStub("1", attr("1", "1.2.3.4", "ip-dst", "7", true, nil))
+	svc := newService(t, s)
+
+	res, err := svc.Event(context.Background(), EventInput{
+		Event: "7", Fields: []string{"uuid", "galaxies"},
+	})
+	if err != nil {
+		t.Fatalf("Event: %v", err)
+	}
+	if !hasNote(res.Notes, "metadata=1") {
+		t.Errorf("an empty galaxy list must not be passed off as certainty: %v", res.Notes)
+	}
+
+	res, err = svc.Event(context.Background(), EventInput{Event: "7", Fields: []string{"uuid"}})
+	if err != nil {
+		t.Fatalf("Event: %v", err)
+	}
+	if hasNote(res.Notes, "metadata=1") {
+		t.Error("the reservation is only relevant when galaxies were asked for")
+	}
+}
