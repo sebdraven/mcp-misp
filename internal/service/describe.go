@@ -30,6 +30,10 @@ type CapsView struct {
 	ContextMax     int `json:"context_events_max"`
 	CheckValues    int `json:"warninglist_check_values_max"`
 	ResponseBytes  int `json:"response_bytes_max"`
+
+	ObjectsPerBatch    int `json:"objects_per_batch_max"`
+	ValuesPerObject    int `json:"values_per_object_max"`
+	ReferencesPerBatch int `json:"references_per_batch_max"`
 }
 
 type DescribeResult struct {
@@ -63,6 +67,8 @@ func (s *Service) Describe(ctx context.Context, in DescribeInput) (*DescribeResu
 			AttrDefault: s.cfg.Caps.AttrDefault, AttrMax: s.cfg.Caps.AttrMax,
 			ContextDefault: s.cfg.Caps.ContextDefault, ContextMax: s.cfg.Caps.ContextMax,
 			CheckValues: s.cfg.Caps.CheckValues, ResponseBytes: s.cfg.Caps.ResponseBytes,
+			ObjectsPerBatch: s.cfg.Caps.ObjectsPerBatch, ValuesPerObject: s.cfg.Caps.ValuesPerObject,
+			ReferencesPerBatch: s.cfg.Caps.ReferencesPerBatch,
 		},
 	}
 

@@ -34,6 +34,13 @@ type Caps struct {
 	ContextMax     int
 	CheckValues    int
 	ResponseBytes  int
+
+	// Write-path ceilings. MISP_MAX_RESULTS does not touch these: it bounds how
+	// much comes back, which is a different question from how much one call may
+	// push into somebody's instance.
+	ObjectsPerBatch    int
+	ValuesPerObject    int
+	ReferencesPerBatch int
 }
 
 func defaultCaps() Caps {
@@ -46,6 +53,10 @@ func defaultCaps() Caps {
 		ContextMax:     200,
 		CheckValues:    1000,
 		ResponseBytes:  256 << 10,
+
+		ObjectsPerBatch:    50,
+		ValuesPerObject:    128,
+		ReferencesPerBatch: 256,
 	}
 }
 
