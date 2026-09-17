@@ -1,0 +1,188 @@
+name: release
+
+# Tags only. A registry push and a GitHub release are publications, and
+# publications should be named and deliberate rather than a side effect of
+# merging to main.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: '1.27'
+  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
+
+jobs:
+  guard:
+    # 'v*' also matches vfoo and v1.2. Everything downstream assumes semver, so
+    # the shape of the tag is checked once, here, before anything is published.
+    runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - name: check the tag format
+        id: check
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "tag '$TAG' is not vMAJOR.MINOR.PATCH[-prerelease]" >&2
+            exit 1
+          fi
+          if printf '%s' "$TAG" | grep -q -- '-'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  binaries:
+    needs: [guard]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # No cache in a publishing workflow. A cache entry poisoned by an
+          # earlier run on a branch would end up baked into a signed release
+          # artefact, and the seconds saved are not worth that.
+          cache: false
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          suffix="${GOOS}-${GOARCH}"
+          # The commit date rather than the wall clock: rerunning this job on
+          # the same tag must produce the same binary.
+          build_date="$(git log -1 --format=%cI)"
+          ldflags="-s -w -X main.version=${TAG} -X main.commit=${GITHUB_SHA} -X main.buildDate=${build_date}"
+          go build -trimpath -ldflags="$ldflags" -o "mcp-misp-${suffix}" ./cmd/mcp-misp
+          shasum -a 256 "mcp-misp-${suffix}" > "checksums-${suffix}.txt"
+
+      - name: publish the artefacts
+        # gh is preinstalled on every runner, so a third-party action here would
+        # add a supply-chain dependency for something the runner already does.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          suffix="${GOOS}-${GOARCH}"
+          flags=(--generate-notes --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then
+            flags+=(--prerelease)
+          fi
+          # The matrix legs race to create the release; the losers fail
+          # harmlessly and go straight to uploading. --clobber makes a rerun of
+          # this job replace its own artefacts rather than duplicate them.
+          gh release create "$TAG" "${flags[@]}" || true
+          gh release upload "$TAG" --clobber \
+            "mcp-misp-${suffix}" \
+            "checksums-${suffix}.txt"
+
+  image:
+    # After the binaries: they are the same code cross-compiled, so a failure
+    # there means the image would ship something that does not build. The
+    # ordering also decides which half-finished state a failure leaves behind —
+    # a release with artefacts and no image is easier to reason about than an
+    # image with no release.
+    needs: [guard, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Cosign keyless signing exchanges this token for a certificate, so the
+      # signature is bound to this workflow rather than to a key someone holds.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: record the build date
+        id: stamp
+        run: echo "date=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # latest is decided here rather than by the action's own heuristic:
+          # a tag carrying a prerelease suffix must never move it.
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+            type=raw,value=latest,enable=${{ needs.guard.outputs.prerelease == 'false' }}
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        id: push
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.stamp.outputs.date }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: sign the image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # Sign by digest, never by tag: a tag can be moved after signing.
+          for tag in $TAGS; do
+            cosign sign --yes "${tag%%:*}@${DIGEST}"
+          done
