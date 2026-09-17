@@ -41,7 +41,11 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("mcp-misp %s (commit %s, built %s)\n", version, commit, buildDate)
+		// Bare version on the first line, matching the sibling MCP servers, so
+		// `head -1` stays a usable version string.
+		fmt.Println(version)
+		fmt.Printf("commit %s\n", commit)
+		fmt.Printf("built  %s\n", buildDate)
 		return
 	}
 
