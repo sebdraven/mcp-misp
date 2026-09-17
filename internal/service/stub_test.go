@@ -370,16 +370,11 @@ func newService(t *testing.T, s *stubMISP, tweak ...func(*config.Config)) *Servi
 	t.Cleanup(srv.Close)
 
 	cfg := &config.Config{
-		URL:       srv.URL,
-		VerifySSL: true,
-		ReadOnly:  true,
-		OutRoot:   t.TempDir(),
-		Caps: config.Caps{
-			SearchDefault: 50, SearchMax: 500,
-			AttrDefault: 100, AttrMax: 1000,
-			ContextDefault: 20, ContextMax: 200,
-			CheckValues: 1000, ResponseBytes: 256 << 10,
-		},
+		URL:          srv.URL,
+		VerifySSL:    true,
+		ReadOnly:     true,
+		OutRoot:      t.TempDir(),
+		Caps:         config.DefaultCaps(),
 		Warninglists: config.Warninglists{MaxEntries: 1000, TTL: time.Hour, LocalFallback: false},
 	}
 	for _, f := range tweak {

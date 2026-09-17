@@ -43,7 +43,10 @@ type Caps struct {
 	ReferencesPerBatch int
 }
 
-func defaultCaps() Caps {
+// DefaultCaps is exported so that anything constructing a Config outside Load
+// starts from the shipped ceilings. A Caps literal written by hand silently
+// leaves new ceilings at zero, and a zero write ceiling refuses every call.
+func DefaultCaps() Caps {
 	return Caps{
 		SearchDefault:  50,
 		SearchMax:      500,
@@ -111,7 +114,7 @@ func Load() (*Config, error) {
 		MaxRetries:     3,
 		Transport:      DefaultTransport,
 		HTTPAddr:       DefaultHTTPAddr,
-		Caps:           defaultCaps(),
+		Caps:           DefaultCaps(),
 		Warninglists: Warninglists{
 			MaxEntries:    200_000,
 			TTL:           6 * time.Hour,

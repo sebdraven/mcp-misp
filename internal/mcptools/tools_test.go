@@ -33,15 +33,10 @@ var writeToolNames = []string{
 func registered(t *testing.T, readOnly bool) []*mcp.Tool {
 	t.Helper()
 	cfg := &config.Config{
-		URL:      "https://misp.example.org",
-		ReadOnly: readOnly,
-		OutRoot:  t.TempDir(),
-		Caps: config.Caps{
-			SearchDefault: 50, SearchMax: 500,
-			AttrDefault: 100, AttrMax: 1000,
-			ContextDefault: 20, ContextMax: 200,
-			CheckValues: 1000, ResponseBytes: 256 << 10,
-		},
+		URL:          "https://misp.example.org",
+		ReadOnly:     readOnly,
+		OutRoot:      t.TempDir(),
+		Caps:         config.DefaultCaps(),
 		Warninglists: config.Warninglists{MaxEntries: 1000, TTL: time.Hour},
 	}
 	svc := service.New(misp.New(cfg.URL, "key"), cfg)
