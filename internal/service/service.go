@@ -40,22 +40,13 @@ func New(client *misp.Client, cfg *config.Config) *Service {
 
 func (s *Service) ReadOnly() bool { return s.cfg.ReadOnly }
 
-// orgName resolves an organisation id to its name.
+// orgIndex maps organisation ids to names.
 //
 // /attributes/restSearch nests an event stub carrying org_id and orgc_id but no
 // names, and a CTI answer that says "org 4" instead of naming the producer is
-// not usable. One cached index covers every attribute of every page.
-func (s *Service) orgName(ctx context.Context, id misp.Str) string {
-	if id == "" {
-		return ""
-	}
-	idx, err := s.orgIndex(ctx)
-	if err != nil {
-		return ""
-	}
-	return idx[id.String()]
-}
-
+// not usable. One cached index covers every attribute of every page; callers
+// index it directly, and a nil index from a failed lookup yields empty names
+// rather than an error that would sink the whole tool.
 func (s *Service) orgIndex(ctx context.Context) (map[string]string, error) {
 	s.mu.Lock()
 	if s.orgs != nil && time.Since(s.orgsAt) < metadataTTL {
