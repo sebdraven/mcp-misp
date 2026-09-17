@@ -28,6 +28,17 @@ type Service struct {
 	describeAt time.Time
 	version    *misp.ServerVersion
 	versionAt  time.Time
+
+	templates       []misp.ObjectTemplate
+	templatesAt     time.Time
+	templateDefs    map[string]templateCacheEntry
+	relationships   map[string]bool
+	relationshipsAt time.Time
+}
+
+type templateCacheEntry struct {
+	def *misp.ObjectTemplateDefinition
+	at  time.Time
 }
 
 func New(client *misp.Client, cfg *config.Config) *Service {

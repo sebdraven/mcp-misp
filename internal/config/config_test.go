@@ -150,7 +150,7 @@ func TestMaxResultsOnlyLowers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.Caps.SearchMax != defaultCaps().SearchMax {
+	if c.Caps.SearchMax != DefaultCaps().SearchMax {
 		t.Errorf("MISP_MAX_RESULTS must not raise a ceiling, got %d", c.Caps.SearchMax)
 	}
 }

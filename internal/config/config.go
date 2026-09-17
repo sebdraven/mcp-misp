@@ -34,9 +34,19 @@ type Caps struct {
 	ContextMax     int
 	CheckValues    int
 	ResponseBytes  int
+
+	// Write-path ceilings. MISP_MAX_RESULTS does not touch these: it bounds how
+	// much comes back, which is a different question from how much one call may
+	// push into somebody's instance.
+	ObjectsPerBatch    int
+	ValuesPerObject    int
+	ReferencesPerBatch int
 }
 
-func defaultCaps() Caps {
+// DefaultCaps is exported so that anything constructing a Config outside Load
+// starts from the shipped ceilings. A Caps literal written by hand silently
+// leaves new ceilings at zero, and a zero write ceiling refuses every call.
+func DefaultCaps() Caps {
 	return Caps{
 		SearchDefault:  50,
 		SearchMax:      500,
@@ -46,6 +56,10 @@ func defaultCaps() Caps {
 		ContextMax:     200,
 		CheckValues:    1000,
 		ResponseBytes:  256 << 10,
+
+		ObjectsPerBatch:    50,
+		ValuesPerObject:    128,
+		ReferencesPerBatch: 256,
 	}
 }
 
@@ -100,7 +114,7 @@ func Load() (*Config, error) {
 		MaxRetries:     3,
 		Transport:      DefaultTransport,
 		HTTPAddr:       DefaultHTTPAddr,
-		Caps:           defaultCaps(),
+		Caps:           DefaultCaps(),
 		Warninglists: Warninglists{
 			MaxEntries:    200_000,
 			TTL:           6 * time.Hour,
