@@ -72,7 +72,6 @@ type EventView struct {
 	Tags           []string     `json:"tags,omitempty"`
 	Galaxies       []GalaxyView `json:"galaxies,omitempty"`
 	AttributeCount int          `json:"attribute_count,omitempty"`
-	ObjectCount    int          `json:"object_count,omitempty"`
 }
 
 // attributeFields is the vocabulary of the fields parameter. warninglist is
@@ -93,12 +92,12 @@ var defaultAttributeFields = []string{
 var eventFields = []string{
 	"id", "uuid", "info", "date", "published", "threat_level", "analysis",
 	"distribution", "org", "orgc", "timestamp", "tags", "galaxies",
-	"attribute_count", "object_count",
+	"attribute_count",
 }
 
 var defaultEventFields = []string{
 	"id", "uuid", "info", "date", "published", "threat_level", "analysis",
-	"org", "orgc", "tags", "attribute_count", "object_count",
+	"org", "orgc", "tags", "attribute_count",
 }
 
 // resolveFields validates a requested projection against a vocabulary. An
@@ -276,7 +275,6 @@ func (s *Service) eventView(e misp.Event, orgs map[string]string) EventView {
 		Timestamp:      e.Timestamp.String(),
 		Tags:           tagNames(e.Tag),
 		AttributeCount: e.AttributeCount.Int(),
-		ObjectCount:    len(e.Object),
 	}
 	if e.Org != nil {
 		v.Org = e.Org.Name
@@ -344,9 +342,6 @@ func projectEvent(v *EventView, allow map[string]bool) {
 	}
 	if !allow["attribute_count"] {
 		v.AttributeCount = 0
-	}
-	if !allow["object_count"] {
-		v.ObjectCount = 0
 	}
 }
 
