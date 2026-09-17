@@ -90,7 +90,12 @@ func (s *Service) Search(ctx context.Context, in SearchInput) (*SearchResult, er
 
 	out := &SearchResult{Returns: returns, Page: page}
 	if in.ExcludeWarninglisted {
-		out.Notes = append(out.Notes, "exclude_warninglisted is on: the instance removed warninglisted attributes before this server saw them, so they are absent rather than flagged")
+		out.Flags = append(out.Flags, FlagFilteredAtSource)
+		out.Notes = append(out.Notes,
+			"exclude_warninglisted is on: the instance removed warninglisted attributes before this server saw them, "+
+				"so they are absent rather than flagged. MISP does not report how many it removed, so the returned count "+
+				"is not a measure of how often this value appears here. Drop exclude_warninglisted to see every match with "+
+				"its warninglist verdict attached.")
 	}
 
 	if returns == "events" {

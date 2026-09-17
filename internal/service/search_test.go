@@ -201,6 +201,14 @@ func TestExcludeWarninglistedDelegatesAndSaysSo(t *testing.T) {
 	if !hasNote(res.Notes, "absent rather than flagged") {
 		t.Errorf("filtering silently is the thing to warn about: %v", res.Notes)
 	}
+	// A model given 12 rows with no word that N were dropped draws a false
+	// conclusion about how common the value is.
+	if !hasNote(res.Notes, "not a measure of how often") {
+		t.Errorf("the note must say the count is not a prevalence: %v", res.Notes)
+	}
+	if !contains(res.Flags, FlagFilteredAtSource) {
+		t.Errorf("the pruning must be machine-readable too: %v", res.Flags)
+	}
 }
 
 // MISP accepts relative windows on timestamp filters but not reliably on

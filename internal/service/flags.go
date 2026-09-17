@@ -11,6 +11,10 @@ const (
 	FlagCoveragePartial       = "warninglist_coverage_partial"
 	FlagCheckUnavailable      = "warninglist_check_unavailable"
 	FlagResultsTruncated      = "results_truncated"
+	// FlagFilteredAtSource marks a result set the instance pruned before this
+	// server saw it. MISP does not say how many rows it removed, so a count
+	// carrying this flag cannot be read as a prevalence.
+	FlagFilteredAtSource = "warninglist_filtered_at_source"
 )
 
 func coverageFlags(rep Report) []string {
