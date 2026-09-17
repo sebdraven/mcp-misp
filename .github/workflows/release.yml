@@ -82,8 +82,9 @@ jobs:
           set -euo pipefail
           suffix="${GOOS}-${GOARCH}"
           # The commit date rather than the wall clock: rerunning this job on
-          # the same tag must produce the same binary.
-          build_date="$(git log -1 --format=%cI)"
+          # the same tag must produce the same binary. Forced to UTC, since the
+          # committer's offset says nothing about the artefact.
+          build_date="$(TZ=UTC0 git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)"
           ldflags="-s -w -X main.version=${TAG} -X main.commit=${GITHUB_SHA} -X main.buildDate=${build_date}"
           go build -trimpath -ldflags="$ldflags" -o "mcp-misp-${suffix}" ./cmd/mcp-misp
           shasum -a 256 "mcp-misp-${suffix}" > "checksums-${suffix}.txt"
@@ -133,7 +134,9 @@ jobs:
 
       - name: record the build date
         id: stamp
-        run: echo "date=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
+        # Same value as the binaries job: the commit date, in UTC.
+        run: |
+          echo "date=$(TZ=UTC0 git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 

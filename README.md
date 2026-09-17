@@ -311,7 +311,10 @@ falling back to read-write or to a public listener is not a recoverable mistake.
 | `MCP_HTTP_ADDR` | listen address (http transport) | `127.0.0.1:8080` |
 
 Flags `-transport` and `-addr` override `MCP_TRANSPORT` and `MCP_HTTP_ADDR`.
-`-version` prints the version, commit and build date.
+`-version` prints the version on the first line, then the commit and the build
+date, so `head -1` is a usable version string. The build date comes from the
+tagged commit in UTC rather than from the build clock, so rerunning a release
+produces the same binary.
 
 ### The API key
 
