@@ -48,8 +48,9 @@ func TestFingerprintDistinguishesQueries(t *testing.T) {
 	if fingerprint("a", 1) == fingerprint("a", 2) {
 		t.Error("different queries must not share a fingerprint")
 	}
-	if fingerprint("a", 1) != fingerprint("a", 1) {
-		t.Error("the same query must fingerprint identically")
+	first, second := fingerprint("a", 1), fingerprint("a", 1)
+	if first != second {
+		t.Errorf("the same query must fingerprint identically: %s != %s", first, second)
 	}
 }
 
