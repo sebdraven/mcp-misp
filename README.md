@@ -25,7 +25,7 @@ library is used, and nothing depends on PyMISP or on any Python at all.
 
 ## Tools
 
-Eight tools: six read, two write. The write tools exist only when the server is
+Eleven tools: seven read, four write. The write tools exist only when the server is
 started with `MISP_READONLY=false` — not disabled, **absent from the tool list**,
 so a client cannot offer what it never saw.
 
@@ -36,12 +36,16 @@ so a client cannot offer what it never saw.
 | `misp_ioc_context` | everything this instance knows about one IOC: events, `to_ids`, sightings, tags, organisations, warninglist verdict |
 | `misp_warninglist_check` | check arbitrary values against the enabled warninglists, or inventory the lists |
 | `misp_taxonomies` | the taxonomies and tags this instance actually carries |
+| `misp_object_templates` | the object templates this instance carries, and one template's relations |
 | `misp_describe_instance` | version, valid attribute types and categories, organisations, enabled warninglist count, ceilings |
 | `misp_add_attribute` | create one attribute — **`MISP_READONLY=false` only** |
+| `misp_create_event` | create an event — **`MISP_READONLY=false` only** |
+| `misp_add_objects` | add several objects and their references in one call — **`MISP_READONLY=false` only** |
 | `misp_tag` | attach tags to an event or attribute — **`MISP_READONLY=false` only** |
 
-There is **no publish tool and no delete tool**, and nothing writes under the
-default configuration.
+There is **no publish tool and no delete tool**, no tag removal, and no way to
+modify an existing object or attribute. The write surface is creation only, and
+nothing writes under the default configuration.
 
 ### `misp_search`
 
@@ -108,6 +112,27 @@ matters to it.
 `include_predicates` expands one named taxonomy and requires `namespace`.
 Expanding them all is one call per taxonomy and tens of thousands of entries.
 
+### `misp_object_templates`
+
+`template`, `search`, `limit`, `cursor`.
+
+What `misp_describe_instance` is to attributes, this is to objects. `misp_add_objects`
+is unusable without it: relation names are template-specific, and a guessed one
+either fails validation or lands as free text.
+
+With no argument it inventories the instance's templates. With a template name
+(`file`, `x509`, …) it returns every relation with its MISP attribute type,
+whether it accepts several values, and the template's own constraints.
+
+**MISP object templates declare no deduplication key.** The format carries
+exactly two constraints — `required` (all must be present) and `required_one_of`
+(at least one must be) — and nothing else. Verified against the 408 definitions
+bundled with misp-objects. Whether an identical object is rejected or duplicated
+is decided at write time; see `on_duplicate` below.
+
+Templates come from the instance, never from a table baked into this server: a
+deployment can carry custom templates, and template versions move.
+
 ### `misp_describe_instance`
 
 `include_type_mapping`. This is what makes instance neutrality workable: the
@@ -125,11 +150,145 @@ creation and the refusal names the list and the engine that decided.
 `allow_warninglisted=true` overrides it. Tags are applied after the attribute
 exists, and a tag failure is reported without undoing the creation.
 
+`misp_create_event` takes `info`, `distribution`, `sharing_group_id`, `date`,
+`threat_level`, `analysis`, `tags[]`.
+
+**`distribution` is required and is given by name**, never as a number:
+`your_organisation_only`, `this_community`, `connected_communities`,
+`all_communities`, `sharing_group`. MISP encodes these 0-4, and a caller passing
+`3` in the belief that it restricts sharing publishes to every connected
+community — the number says nothing, the name does. There is no default: on a
+CSIRT instance the instance-wide default can be `all_communities`, and a badly
+distributed event is a sharing incident rather than a typo.
+
+The event is created **unpublished**, and `published` is neither a parameter nor
+a field in the payload sent to MISP. Publishing stays a human decision in the
+MISP interface, for the same reason there has never been a publish tool.
+
+`misp_add_objects` takes `event`, `objects[]`, `references[]`, `on_duplicate`,
+`allow_unknown_relations`, `allow_warninglisted`. It is documented in full below.
+
 `misp_tag` takes `target` (`event` or `attribute`), `id` (numeric or UUID) and
 `tags[]`. **Adding only.** There is no removal tool: `tlp:` and `PAP:` tags
 drive how MISP distributes data, so removing one is a sharing decision dressed
 as an annotation. If removal is ever added it must refuse those two namespaces
 outright.
+
+## Batched object ingestion
+
+`misp_add_objects` exists so that a whole analysis lands as one linked graph. An
+APK, its x509 certificate, its C2 domains and its permissions go in a single
+call, with the references that join them — not ten calls with a uuid carried by
+hand between each.
+
+Each object may declare a local `ref`, and `references[]` joins those refs, so
+objects created in the same call can be linked without knowing any uuid in
+advance. A reference endpoint may also be the uuid of an object already in the
+event.
+
+### Validation happens in two phases
+
+**Phase 0** resolves one template per *distinct* template name in the batch, not
+one per object, and caches it.
+
+**Phase 1 validates the whole batch and writes nothing.** Every problem is
+collected, then the entire batch is refused with per-object, per-relation
+detail. There is no partial creation on a validation error.
+
+| Checked | Loosened by `allow_unknown_relations` |
+| --- | --- |
+| the template exists on this instance | no |
+| every relation is declared by the template | **yes** |
+| the attribute type matches the template's `misp-attribute` | no |
+| a relation marked `multiple: false` receives one value | no |
+| every relation in `required` is present | no |
+| at least one relation in `required_one_of` is present | no |
+| every reference endpoint resolves to a batch `ref` or a uuid | no |
+| batch, per-object value and reference ceilings | no |
+| every value of the batch against the warninglists, in one call | `allow_warninglisted` |
+
+A warninglist hit refuses the batch naming the object, the relation, the value,
+the list **and the engine that decided** — the same instance/local divergence,
+and the same message, as `misp_add_attribute`.
+
+**Phase 2 writes** in a fixed order: objects first, in batch order, collecting
+each `ref`'s uuid; then references, once every target exists.
+
+### `allow_unknown_relations` will not coerce an IOC
+
+A relation the template does not declare still needs a MISP attribute type to be
+written. With `allow_unknown_relations` it is written as `text` and reported in
+`coerced_relations`.
+
+**Except when the value looks like something MISP correlates on.** A hash, an IP,
+a CIDR, a domain, a URL or an email written as `text` sits in the database
+invisible to every pivot — intel written and lost, which is worse than a
+refusal. Those are refused even with the flag set, and the refusal names the
+template relation that would have worked when one exists:
+
+> value looks like sha256 and would be written as free text, which MISP never
+> correlates on; allow_unknown_relations does not cover this — use relation
+> "sha256", which template "file" declares as sha256
+
+### Duplicates: what MISP actually does
+
+`POST /objects/add/{event_id}` takes a `breakOnDuplicate` parameter, passed as a
+CakePHP named path segment rather than a query string:
+
+- **absent** → MISP creates the object **even if an identical one already exists**
+  in the event. That is the server-side default.
+- **`breakOnDuplicate:1`** → MISP compares the object's attribute set against the
+  existing objects and **rejects** on a match. PyMISP documents this as
+  potentially slow.
+
+There is no merge and no update: either a duplicate or a rejection.
+
+This server **always sends the parameter explicitly** and never lets the
+instance's setting decide. `on_duplicate` defaults to `reject`, so a batch
+replayed after a network failure does not double the APK's `file` object.
+
+A duplicate rejection is an expected outcome, not a failure: it is recorded
+under `duplicates`, the batch **carries on**, and any reference touching the
+rejected object is listed in `not_attempted` with its reason. That is what makes
+a re-run useful — it creates what is still missing and tells you which links
+could not be made.
+
+### There is no rollback
+
+This server has no delete, and this lot did not add one through the back door.
+When a genuine write error occurs after validation, writing stops and the answer
+is exact:
+
+| Field | |
+| --- | --- |
+| `created_objects` | ref, template, uuid, id, attribute count |
+| `created_references` | both endpoints, their uuids, and the relationship type written |
+| `duplicates` | objects the instance refused as already present |
+| `failed_at` | stage, index, ref, and the instance's error |
+| `not_attempted` | everything left untouched, named |
+
+A half-written batch whose stopping point is known is recoverable. One whose
+stopping point is not, is not.
+
+### Relationship types are usually unvalidated
+
+MISP seeds its object-relationship vocabulary from misp-objects into a table,
+but **exposes no documented REST index for it, and stores `relationship_type` as
+a free-text column**. This server probes the instance once per hour; when the
+probe finds nothing — which is the expected case today — references are written
+unchecked.
+
+Because a typo is then accepted silently and yields `contains` and `contain`
+living side by side in the same event, every answer in that case carries:
+
+- `relationship_type_validated: false`,
+- the exact string written for **each** reference, in `created_references`,
+- the distinct values in `unvalidated_relationship_types`,
+- and a note saying so — **on every call**, not only the first.
+
+Hard-coding the 313 relationship names would make validation possible, and is
+excluded for the same reason as hard-coding templates: this server runs against
+instances it has never seen.
 
 ## Warninglists
 
@@ -493,6 +652,47 @@ misattribute an event's TLP tag to a single attribute.
 **Objects are not modelled.** `misp_event` never fetches the event object graph.
 Object membership is visible through the `object_id` and `object_relation`
 attribute fields, and nothing reconstructs an object's semantics.
+
+**Object relationship types are written unchecked on most instances.** See the
+section above. The consequence to carry: a misspelt relationship type is
+accepted by MISP and produces two relations that look alike and never match.
+Read `unvalidated_relationship_types` before considering a batch done.
+
+**The structured-value detector is a heuristic, and it produces false
+positives.** `allow_unknown_relations` refuses coercion for anything shaped like
+a hash, an IP, a CIDR, a domain, a URL or an email. Shape is all it has to go
+on, so a filename that happens to be 64 hex characters reads as a SHA-256, a
+version string reads as a hostname, and a template's own `sane_default` can trip
+it. Those refusals are wrong, and there is no override for them.
+
+That asymmetry is deliberate: a refusal is recoverable in one move, whereas an
+IOC written as `text` is in the database and invisible to every pivot, with
+nothing to signal it. So the refusal is built to be actionable rather than
+merely negative — it names the relation to use instead:
+
+> value looks like sha256 and would be written as free text, which MISP never
+> correlates on; allow_unknown_relations does not cover this — use relation
+> "sha256", which template "file" declares as sha256
+
+**Where that advice runs out**: when the template declares no relation of the
+detected type at all, the message can only name the attribute types that would
+have fitted. There is then no way to place the value on that object, and the
+value belongs somewhere else — on its own object of a fitting template, linked
+by a reference, or as a plain attribute through `misp_add_attribute`.
+
+**The object-template cache can validate against a stale definition.** Template
+definitions are cached for an hour, and templates carry a version. If
+misp-objects is updated on the instance inside that window — a new relation, a
+changed type, a tightened `required` — validation runs against the definition
+this server fetched before the update. The consequence is a batch refused for a
+relation that now exists, or accepted against a constraint that has since
+changed. The version this server used is reported by `misp_object_templates`;
+restarting the server clears the cache.
+
+**Write ceilings are independent of `MISP_MAX_RESULTS`.** That variable bounds
+how much comes back; how much one call may push into somebody's instance is a
+different question, and is bounded by the batch ceilings reported by
+`misp_describe_instance`.
 
 **The organisation index is cached for an hour.** An organisation created during
 that window resolves to an empty name until the cache expires.
