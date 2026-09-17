@@ -341,6 +341,25 @@ func (c *Client) Version(ctx context.Context) (*ServerVersion, error) {
 	return &v, nil
 }
 
+// Attribute returns GET /attributes/view/{id}. It exists so that a numeric
+// attribute id can be turned into the UUID the tagging endpoint requires.
+func (c *Client) Attribute(ctx context.Context, id string) (*Attribute, error) {
+	raw, err := c.get(ctx, "/attributes/view/"+url.PathEscape(id), nil)
+	if err != nil {
+		return nil, err
+	}
+	var env struct {
+		Attribute *Attribute `json:"Attribute"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, c.malformed("/attributes/view", err)
+	}
+	if env.Attribute == nil {
+		return nil, &APIError{kind: KindNotFound, Message: "attribute not found"}
+	}
+	return env.Attribute, nil
+}
+
 // AddAttribute creates an attribute on an event. Never retried: a create that
 // timed out mid-flight may well have landed.
 func (c *Client) AddAttribute(ctx context.Context, event string, in AttributeInput) (*Attribute, error) {

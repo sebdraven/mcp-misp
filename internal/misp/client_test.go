@@ -338,3 +338,15 @@ func readAll(r *http.Request) ([]byte, error) {
 		}
 	}
 }
+
+// withMaxBody exists for the oversized-response test. This guards the default
+// it must not have changed.
+func TestDefaultBodyCapIsProduction(t *testing.T) {
+	c := New("http://x", testKey)
+	if c.maxBody != maxBody {
+		t.Fatalf("default maxBody = %d, want %d", c.maxBody, maxBody)
+	}
+	if maxBody != 64<<20 {
+		t.Fatalf("production body cap = %d, want 64 MiB", maxBody)
+	}
+}
