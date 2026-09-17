@@ -62,7 +62,12 @@ type Report struct {
 	// UncoveredLists names enabled warninglists that did not take part, or took
 	// part only in part.
 	UncoveredLists []string `json:"uncovered_lists,omitempty"`
-	Note           string   `json:"note,omitempty"`
+	// LoadedEntries and LoadedBytes describe the local index when it answered.
+	// The budget is counted in entries, but a CIDR and a long substring do not
+	// cost the same, so the measured size is what an operator needs to set it.
+	LoadedEntries int    `json:"loaded_entries,omitempty"`
+	LoadedBytes   int    `json:"loaded_bytes,omitempty"`
+	Note          string `json:"note,omitempty"`
 }
 
 // instanceCooldown is how long the instance path stays disabled after the
@@ -133,6 +138,8 @@ func (k *Checker) Check(ctx context.Context, subjects []Subject) (map[string]Che
 		report.Coverage = CoveragePartial
 	}
 	report.UncoveredLists = idx.uncovered
+	report.LoadedEntries = idx.entries
+	report.LoadedBytes = idx.bytes
 	report.Note = joinNote(report.Note, idx.note)
 
 	hits := make(map[string][]misp.WarninglistHit, len(values))
@@ -226,6 +233,8 @@ type localIndex struct {
 	loadedAt  time.Time
 	lists     []*localList
 	uncovered []string
+	entries   int
+	bytes     int
 	complete  bool
 	note      string
 }
@@ -322,9 +331,11 @@ func (k *Checker) buildIndex(ctx context.Context) (*localIndex, error) {
 			continue
 		}
 		entries := make([]string, 0, len(full.WarninglistEntry))
+		bytes := 0
 		for _, e := range full.WarninglistEntry {
 			if e.Value != "" {
 				entries = append(entries, e.Value)
+				bytes += len(e.Value)
 			}
 		}
 		if used+len(entries) > budget {
@@ -341,6 +352,7 @@ func (k *Checker) buildIndex(ctx context.Context) (*localIndex, error) {
 			idx.uncovered = append(idx.uncovered, meta.Name)
 		}
 		used += len(entries)
+		idx.bytes += bytes
 		idx.lists = append(idx.lists, &localList{
 			id:       meta.ID.String(),
 			name:     meta.Name,
@@ -351,10 +363,11 @@ func (k *Checker) buildIndex(ctx context.Context) (*localIndex, error) {
 		})
 	}
 
+	idx.entries = used
 	idx.complete = len(idx.uncovered) == 0
 	if !idx.complete {
-		idx.note = fmt.Sprintf("%d of %d enabled warninglists were not fully applied (entry budget %d, used %d)",
-			len(idx.uncovered), len(enabled), budget, used)
+		idx.note = fmt.Sprintf("%d of %d enabled warninglists were not fully applied (entry budget %d, used %d entries / %d bytes)",
+			len(idx.uncovered), len(enabled), budget, used, idx.bytes)
 	}
 	return idx, nil
 }
