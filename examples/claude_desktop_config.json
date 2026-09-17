@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "misp": {
+      "command": "/usr/local/bin/mcp-misp",
+      "args": ["-transport", "stdio"],
+      "env": {
+        "MISP_URL": "https://misp.example.org",
+        "MISP_KEY": "replace-with-your-api-key",
+        "MISP_VERIFY_SSL": "true",
+        "MISP_TIMEOUT": "60s",
+        "MISP_READONLY": "true",
+        "MISP_OUT_ROOT": "/tmp/mcp-misp"
+      }
+    }
+  }
+}
